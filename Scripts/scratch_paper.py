@@ -44,10 +44,10 @@ except requests.exceptions.HTTPError as e:
     print(e.response.content)
     exit(1)
 
-# --- Metadata Search ---
-def fetch_models(ts, include_dependents=True):
+# --- Action 1: Fetch and Filter Models ---
+def fetch_and_filter_models(ts, days_old: 90, include_dependents: True):
     """
-    Fetch all LOGICAL_TABLE models. Optionally include dependent objects.
+    Retrieve and filter models older than `days_old`.
     """
     search_request = {
         'metadata': [{'type': 'LOGICAL_TABLE'}],
@@ -57,38 +57,41 @@ def fetch_models(ts, include_dependents=True):
         'record_size': 100000
     }
 
-    result = ts.metadata_search(request=search_request)
-    print(f"Retrieved {len(result)} models.")
-    return result
+    models = ts.metadata_search(request=search_request)
+    print(f"Retrieved {len(models)} models.")
 
-# --- Retrieve and Flatten Metadata for Dataframe ---
-models = fetch_models(ts, include_dependents=args.include_dependents)
+    flat_rows = []
+    for model in models:
+        header = model.get('metadata_header') or {}
+        flat_rows.append({
+            'id': header.get('id'),
+            'name': header.get('name'),
+            'author': header.get('authorDisplayName'),
+            'created': header.get('created')
+        })
 
-flat_rows = []
-for model in models:
-    header = model.get('metadata_header') or {}
-    flat_rows.append({
-        'id': header.get('id'),
-        'name': header.get('name'),
-        'author': header.get('authorDisplayName'),
-        'created': header.get('created')
-    })
+    df = pd.DataFrame(flat_rows)
+    df['created_dt'] = pd.to_datetime(df['created'], unit='ms', errors='coerce')
 
-df_models = pd.DataFrame(flat_rows)
-df_models['created_dt'] = pd.to_datetime(df_models['created'], unit='ms', errors='coerce')
+    print("\nRetrieved Models (Preview):")
+    print(df[['name', 'id', 'author', 'created_dt']].head(100))
 
-# --- Display Retrieved Models ---
-print("\nRetrieved Models (Preview):")
-print(df_models[['name', 'id', 'author', 'created_dt']].head(100))
+    cutoff_date = datetime.now() - timedelta(days=days_old)
+    df_filtered = df[df['created_dt'] < cutoff_date].copy()
+    df_filtered['status'] = 'passed_action_1'
 
-# --- Filter Models by Age (Action 1) ---
-cutoff_date = datetime.now() - timedelta(days=args.days)
-df_action1_passed = df_models[df_models['created_dt'] < cutoff_date].copy()
-df_action1_passed['status'] = 'passed_action_1'
+    print("\nModels That Passed Action 1:")
+    print(df_filtered[['name', 'id', 'author', 'created_dt', 'status']].head(100))
 
-# --- Output Action 1 Passed Models ---
-print("\nModels That Passed Action 1:")
-print(df_action1_passed[['name', 'id', 'author', 'created_dt', 'status']].head(100))
+    return df_filtered
+
+
+# --- Execute Action 1 ---
+df_action1_passed = fetch_and_filter_models(
+    ts=ts,
+    days_old=args.days,
+    include_dependents=args.include_dependents
+)
 
 # --- Future Steps ---
 # TODO: Action 2 – Search data usage check
