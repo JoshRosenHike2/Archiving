@@ -37,11 +37,24 @@ except requests.exceptions.HTTPError as e:
     print(e.response.content)
     exit(1)
 
-# --- Action 1: Fetch and Filter Models ---
-def fetch_and_filter_models(ts, days_old: 90, include_dependents: True):
-    """
-    Retrieve and filter models older than `days_old`.
-    """
+
+
+
+
+
+
+
+
+
+
+
+# --- Action 1 & 2: Fetch and Filter Models ---
+
+
+
+
+def fetch_and_filter_models(ts, days_old: 10, include_dependents: True):
+
     search_request = {
         'metadata': [{'type': 'LOGICAL_TABLE'}],
         'include_details': True,
@@ -57,29 +70,29 @@ def fetch_and_filter_models(ts, days_old: 90, include_dependents: True):
     for model in models:
         header = model.get('metadata_header') or {}
         flat_rows.append({
-            'id': header.get('id'),
-            'name': header.get('name'),
-            'author': header.get('authorDisplayName'),
-            'created': header.get('created')
+            'GUID': header.get('id'),
+            'Name': header.get('name'),
+            'Author': header.get('authorDisplayName'),
+            'Created': header.get('created')
         })
 
     df = pd.DataFrame(flat_rows)
-    df['created_dt'] = pd.to_datetime(df['created'], unit='ms', errors='coerce')
+    df['Created_dt'] = pd.to_datetime(df['Created'], unit='ms', errors='coerce')
+
 
     print("\nRetrieved Models (Preview):")
-    print(df[['name', 'id', 'author', 'created_dt']].head(100))
+    print(df[['Name', 'GUID', 'Author', 'Created_dt']].head(100))
 
     cutoff_date = datetime.now() - timedelta(days=days_old)
-    df_filtered = df[df['created_dt'] < cutoff_date].copy()
-    df_filtered['status'] = 'passed_action_1'
+    df_filtered = df[df['Created_dt'] < cutoff_date].copy()
+    df_filtered['Status'] = 'passed_action_1_&_2'
 
-    print("\nModels That Passed Action 1:")
-    print(df_filtered[['name', 'id', 'author', 'created_dt', 'status']].head(100))
+    print("\nModels That Passed Action 1 & 2:")
+    print(df_filtered[['Name', 'GUID', 'Author', 'Created_dt', 'Status']].head(100))
 
     return df_filtered
-
-
-# --- Execute Action 1 ---
+    
+# --- Execute Action 1 & 2 ---
 df_action1_passed = fetch_and_filter_models(
     ts=ts,
     days_old=args.days,
@@ -88,12 +101,20 @@ df_action1_passed = fetch_and_filter_models(
 
 
 
-
-## Action 2: Filter list of models to show only those that have been created > X days and add GUID to List 
-
 ## Action 3: Check to see if those models have any real responses in the last X days (Search data API) if they do discard them from the list
 
+
+
+
+
+
 ## Action 4: For each model GUID Retrieve list of dependents (Might already have this from Action 1)
+
+
+
+
+
+
 
 ## Action 5: Check to see if there was any activity on those dependents (Liveboards / Answers) in the last X days If there was discard GUID from List
 
