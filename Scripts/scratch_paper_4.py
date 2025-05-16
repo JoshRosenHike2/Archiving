@@ -57,10 +57,6 @@ def filter_old_models(df, min_age_days):
     cutoff = datetime.now() - timedelta(days=min_age_days)
     return df[df['Created_dt'] < cutoff].copy()
 
-
-# --- Step 3: Check to see if those models have any real responses in the last X days (Search data API) if they do discard them from the list
-
-
 # --- Step 4: Get dependent GUIDs ---
 def get_dependents(model_id):
     request = {
@@ -103,15 +99,26 @@ def get_total_impressions(dependents, days_window):
             total += args.imp_threshold
     return total
 
-
-## Action 6: Check to see if there are alerts set on any dependencies? (Export TML API) If there is Discard GUID from List
-
-## Action 7: For remaining GUIDS, find and store all Ownership and sharing details for each model and dependents 
-
-## Action 8: Export all data to Archive
-
-
-
+# --- Step 6: Check for alerts on any dependents using TML export ---
+def check_alerts_on_dependents(row):
+    for guid in row['Dependent_GUIDs']:
+        try:
+            payload = {
+                "metadata": [{"identifier": guid}],
+                "export_associated": True
+            }
+            res = ts.post_request("/metadata/tml/export", payload)
+            if isinstance(res, list):
+                if any(item.get("info", {}).get("filename", "").lower() == "alerts.tml" for item in res):
+                    return "Alert Found"
+            return "No Alerts Found"
+        except requests.exceptions.HTTPError as e:
+            print(f"[Error] Failed to inspect dependent {guid}: {e.response.status_code}")
+            return "Unknown"
+        except Exception as e:
+            print(f"[Error] Unexpected failure inspecting dependent {guid}: {e}")
+            return "Unknown"
+    return "No Alerts Found"
 
 # --- Execution ---
 print("1) All fetched models:")
@@ -141,5 +148,13 @@ models_with_imps_df = pd.DataFrame(models_with_imps)
 print(models_with_imps_df[['Name', 'Model_ID', 'Dependent_GUIDs', 'Total_Impressions']], "\n")
 
 print(f"5) Models older than {args.days} days with total impressions < {args.imp_threshold}:")
-filtered_models = models_with_imps_df[models_with_imps_df['Total_Impressions'] < args.imp_threshold]
-print(filtered_models[['Name', 'Model_ID', 'Dependent_GUIDs', 'Total_Impressions']])
+filtered_models = models_with_imps_df[models_with_imps_df['Total_Impressions'] < args.imp_threshold].copy()
+print(filtered_models[['Name', 'Model_ID', 'Dependent_GUIDs', 'Total_Impressions']], "\n")
+
+print("6) Final models with no alerts or unknown status on any dependents:")
+filtered_models['Alert_Status'] = filtered_models.apply(check_alerts_on_dependents, axis=1)
+print(filtered_models[['Name', 'Model_ID', 'Total_Impressions', 'Alert_Status']], "\n")
+
+print("7) Models ready for archiving (Alert_Status == 'No Alerts Found'):")
+final_models = filtered_models[filtered_models['Alert_Status'] == "No Alerts Found"]
+print(final_models[['Name', 'Model_ID', 'Total_Impressions', 'Alert_Status']])
