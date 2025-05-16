@@ -129,35 +129,3 @@ print(models_with_imps_df[['Name', 'Model_ID', 'Dependent_GUIDs', 'Total_Impress
 print(f"5) Models older than {args.days} days with total impressions < {args.imp_threshold}:")
 filtered_models = models_with_imps_df[models_with_imps_df['Total_Impressions'] < args.imp_threshold]
 print(filtered_models[['Name', 'Model_ID', 'Dependent_GUIDs', 'Total_Impressions']])
-
-
-
-
-
-
-
-
-## Action 3: Check to see if those models have any real responses in the last X days (Search data API) if they do discard them from the list
-
-
-
-
-
-
-## Action 4: For each model GUID Retrieve list of dependents (Might already have this from Action 1)
-
-
-
-
-
-
-
-## Action 5: Check to see if there was any activity on those dependents (Liveboards / Answers) in the last X days If there was discard GUID from List
-
-## Action 6: Check to see if there are alerts set on any dependencies? (Export TML API) If there is Discard GUID from List
-
-## Action 7: For remaining GUIDS, find and store all Ownership and sharing details for each model and dependents 
-
-## Action 8: Export all data to Archive
-
-## disregard system user, etc. 

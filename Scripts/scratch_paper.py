@@ -97,7 +97,7 @@ def exclude_active_models(ts, df, days_old, logical_table_id, record_size=1):
     valid = []
     for _, row in df.iterrows():
         deps = row.get('Dependent_GUIDs', [])
-        # If no dependencies, include the model
+
         if not deps:
             valid.append(row['GUID'])
             continue
