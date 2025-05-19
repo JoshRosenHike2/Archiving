@@ -1,21 +1,14 @@
-# Archiving
-Archiving process for Thoughtspot objects.
+# 🧹 ThoughtSpot Metadata Archiving Script
 
+This script identifies and exports ThoughtSpot models (logical tables) that are:
+- Older than a specified number of days
+- Have total impressions under a threshold
+- Do **not** have alerts attached to their dependent objects
 
-To run archiving_rough_draft
+It also previews sample sharing permissions and exports a single hardcoded model by GUID.
 
-python /Users/joshrosen/Documents/GitHub/Archiving/Scripts/archiving_rough_draft.py \
-  --days 90 \
-  --lookback-days 90 \
-  --imp-threshold 1000 \
-  --env-file /Users/joshrosen/Documents/GitHub/Archiving/Scripts/.env
+---
 
+## ✅ How to Run
 
-
-
-To run check_model_alerts
-
-
-python /Users/joshrosen/Documents/GitHub/Archiving/Scripts/check_model_alerts.py \
-  --model-guid 6b881308-4eb0-4e2d-964a-c5efcdaf3db8 \
-  --env-file /Users/joshrosen/Documents/GitHub/Archiving/Scripts/.env
+python Scripts/archiving_final.py --days 1 --lookback-days 100 --imp-threshold 10000000 --env-file Scripts/.env
