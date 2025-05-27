@@ -179,12 +179,12 @@ all_models = get_all_models()  # Call function to get all models
 print(all_models, "\n")
 
 print("=========================================")
-print(f"2) Models older than {args.days} days:")
+print(f"2) Models created in the last {args.days} days:")
 old_models = filter_old_models(all_models, args.days)  # Filter by age
 print(old_models, "\n")
 
 print("=========================================")
-print(f"3) Models older than {args.days} days with dependencies:")
+print(f"3) list of  Dependents for the Models :")
 models_with_dependencies = []
 for _, model in old_models.iterrows():
     deps = get_dependents(model['Model_ID'])  # Get dependents for each model
@@ -193,7 +193,7 @@ models_with_dependencies_df = pd.DataFrame(models_with_dependencies)  # Convert 
 print(models_with_dependencies_df[['Name', 'Model_ID', 'Dependent_GUIDs']], "\n")
 
 print("=========================================")
-print(f"4) With dependencies and total impressions (last {args.lookback_days} days):")
+print(f"4) Activity on dependent Liveboards or Answers in the last {args.lookback_days} days):")
 with_impressions = []
 for _, row in models_with_dependencies_df.iterrows():
     imps = get_total_impressions(row['Dependent_GUIDs'], args.lookback_days)  # Get impression count
@@ -202,12 +202,12 @@ with_imps_df = pd.DataFrame(with_impressions)  # Convert to DataFrame
 print(with_imps_df[['Name', 'Model_ID', 'Dependent_GUIDs', 'Total_Impressions']], "\n")
 
 print("=========================================")
-print(f"5) With total impressions < {args.imp_threshold}:")
+print(f"5) Activity on dependent Liveboards or Answers in the last {args.lookback_days} days) With total impressions < {args.imp_threshold}:")
 filtered = with_imps_df[with_imps_df['Total_Impressions'] < args.imp_threshold].copy()  # Apply threshold filter
 print(filtered[['Name', 'Model_ID', 'Dependent_GUIDs', 'Total_Impressions']], "\n")
 
 print("=========================================")
-print("6) Alert check on dependents:")
+print("6) Active alerts on any dependencies?")
 filtered['Alert_Status'] = filtered.apply(check_alerts_on_dependents, axis=1)  # Add alert check result
 print(filtered[['Name', 'Model_ID', 'Total_Impressions', 'Alert_Status']], "\n")
 

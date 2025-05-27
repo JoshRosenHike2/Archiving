@@ -11,4 +11,4 @@ It also previews sample sharing permissions and exports a single hardcoded model
 
 ## ✅ How to Run
 
-python Scripts/archiving_final.py --days 1 --lookback-days 100 --imp-threshold 10000000 --env-file Scripts/.env
+python Scripts/archiving_final.py --days 1 --lookback-days 1000 --imp-threshold 10000000 --env-file Scripts/.env

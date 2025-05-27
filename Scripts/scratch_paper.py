@@ -1,36 +1,48 @@
-import argparse
-import os
-import requests.exceptions
-from datetime import datetime, timedelta
-import pandas as pd
-from dotenv import load_dotenv
-from thoughtspot_rest_api_v1 import *
+# =========================================
+# Import required libraries
+# =========================================
+import argparse  # For parsing command-line arguments
+import os  # For accessing environment variables and file paths
+import requests.exceptions  # To handle HTTP request exceptions
+from datetime import datetime, timedelta  # For working with dates and time windows
+import pandas as pd  # For handling tabular data
+from dotenv import load_dotenv  # For loading environment variables from a .env file
+from thoughtspot_rest_api_v1 import *  # Import all functions from the ThoughtSpot API wrapper
 
-# --- CLI Argument Parsing ---
+# =========================================
+# Parse command-line arguments
+# =========================================
 parser = argparse.ArgumentParser(description='Archive ThoughtSpot models based on age and usage.')
 parser.add_argument('--days', type=int, default=90, help='Minimum model age in days (default: 90)')
 parser.add_argument('--lookback-days', type=int, default=90, help='How far back to look for impressions (default: 90)')
 parser.add_argument('--imp-threshold', type=int, default=1, help='Max allowed impressions (default: 1)')
 parser.add_argument('--env-file', type=str, default='.env', help='Path to .env file')
-args = parser.parse_args()
+args = parser.parse_args()  # Parse all the arguments provided at runtime
 
-# --- Load Environment ---
-load_dotenv(dotenv_path=args.env_file)
-USERNAME = os.getenv('TS_USERNAME')
-PASSWORD = os.getenv('TS_PASSWORD')
-SERVER_URL = os.getenv('TS_SERVER_URL')
-LOGICAL_TABLE_ID = os.getenv('TS_LOGICAL_TABLE_ID')
+# =========================================
+# Load environment variables
+# =========================================
+load_dotenv(dotenv_path=args.env_file)  # Load environment variables from .env file
+USERNAME = os.getenv('TS_USERNAME')  # ThoughtSpot username
+PASSWORD = os.getenv('TS_PASSWORD')  # ThoughtSpot password
+SERVER_URL = os.getenv('TS_SERVER_URL').rstrip('/')  # Clean server URL to avoid double slashes
+LOGICAL_TABLE_ID = os.getenv('TS_LOGICAL_TABLE_ID')  # Logical table ID for impression lookups
+SAMPLE_GUID = os.getenv('TS_SAMPLE_GUID')  # Optional sample GUID for steps 8 and 9
 
-# --- Authenticate ---
-ts = TSRestApiV2(server_url=SERVER_URL)
+# =========================================
+# Authenticate with ThoughtSpot
+# =========================================
+ts = TSRestApiV2(server_url=SERVER_URL)  # Initialize ThoughtSpot API client
 try:
-    token = ts.auth_token_full(username=USERNAME, password=PASSWORD, validity_time_in_sec=3600)
-    ts.bearer_token = token['token']
+    token = ts.auth_token_full(username=USERNAME, password=PASSWORD, validity_time_in_sec=3600)  # Get auth token
+    ts.bearer_token = token['token']  # Apply bearer token to session
 except requests.exceptions.HTTPError as e:
-    print("Authentication failed:", e.response.content)
+    print("Authentication failed:", e.response.content)  # Print failure
     exit(1)
 
-# --- Step 1: Fetch All Models ---
+# =========================================
+# Step 1: Fetch all models
+# =========================================
 def get_all_models():
     request = {
         'metadata': [{'type': 'LOGICAL_TABLE'}],
@@ -38,7 +50,7 @@ def get_all_models():
         'record_offset': 0,
         'record_size': 100000
     }
-    result = ts.metadata_search(request=request)
+    result = ts.metadata_search(request=request)  # Fetch all logical table metadata
     rows = []
     for model in result:
         meta = model.get('metadata_header', {})
@@ -49,15 +61,19 @@ def get_all_models():
             'Created_ms': meta.get('created')
         })
     df = pd.DataFrame(rows)
-    df['Created_dt'] = pd.to_datetime(df['Created_ms'], unit='ms', errors='coerce')
+    df['Created_dt'] = pd.to_datetime(df['Created_ms'], unit='ms', errors='coerce')  # Convert to datetime
     return df
 
-# --- Step 2: Filter by Age ---
+# =========================================
+# Step 2: Filter models older than N days
+# =========================================
 def filter_old_models(df, min_age_days):
-    cutoff = datetime.now() - timedelta(days=min_age_days)
-    return df[df['Created_dt'] < cutoff].copy()
+    cutoff = datetime.now() - timedelta(days=min_age_days)  # Calculate cutoff date
+    return df[df['Created_dt'] < cutoff].copy()  # Filter DataFrame
 
-# --- Step 4: Get Dependents ---
+# =========================================
+# Step 4: Fetch dependent object GUIDs for a model
+# =========================================
 def get_dependents(model_id):
     request = {
         'metadata': [{'type': 'LOGICAL_TABLE', 'identifier': model_id}],
@@ -70,15 +86,16 @@ def get_dependents(model_id):
     if not res:
         return []
     dependents = res[0].get('dependent_objects', {}).get(model_id, {})
-    return [obj['id'] for lst in dependents.values() for obj in lst]
+    return [obj['id'] for lst in dependents.values() for obj in lst]  # Flatten
 
-# --- Step 5: Total Impressions ---
+# =========================================
+# Step 5: Get total impressions for dependents
+# =========================================
 def get_total_impressions(dependents, days_window):
     total = 0
     for guid in dependents:
         query_string = (
-            f"[Answer Book GUID] = '{guid}' "
-            f"count [Impressions] [Timestamp].'last {days_window} days' max [Timestamp]"
+            f"[Answer Book GUID] = '{guid}' count [Impressions] [Timestamp].'last {days_window} days' max [Timestamp]"
         )
         request = {
             'query_string': query_string,
@@ -95,69 +112,71 @@ def get_total_impressions(dependents, days_window):
                 total += contents[0]['data_rows'][0][idx]
         except Exception as e:
             print(f"[Impression Fetch Failed] {guid}: {e}")
-            total += args.imp_threshold
+            total += args.imp_threshold  # Assume max if fetch fails
     return total
 
-# --- Step 6: Check Alerts ---
+# =========================================
+# Step 6: Check for alerts in dependent TMLs
+# =========================================
 def check_alerts_on_dependents(row):
     for guid in row['Dependent_GUIDs']:
         try:
             payload = {"metadata": [{"identifier": guid}], "export_associated": True}
-            res = ts.post_request("/metadata/tml/export", payload)
+            res = ts.post_request("metadata/tml/export", payload)
             if isinstance(res, list):
                 if any(item.get("info", {}).get("filename", "").lower() == "alerts.tml" for item in res):
                     return "Alert Found"
             return "No Alerts Found"
         except requests.exceptions.HTTPError as e:
-            print(f"[Error] Failed to inspect {guid}: {e.response.status_code}")
+            if e.response.status_code != 404:
+                print(f"[Error] Failed to inspect {guid}: {e.response.status_code}")
             return "Unknown"
         except Exception as e:
             print(f"[Unexpected Error] {guid}: {e}")
             return "Unknown"
     return "No Alerts Found"
 
-# --- Step 8: Export TML ---
-def export_tml(models_df):
-    summary = []
-    sample_export = None
-    for _, row in models_df.iterrows():
-        model_id = row['Model_ID']
-        model_name = row['Name']
-        payload = {"metadata": [{"identifier": model_id}]}
-        try:
-            res = ts.post_request("/metadata/tml/export", payload)
-            status = "Exported successfully"
-            if not sample_export:
-                sample_export = res
-        except Exception as e:
-            status = f"Failed - {str(e)}"
-        summary.append({
-            'Model_ID': model_id,
-            'Name': model_name,
-            'Export_Status': status
-        })
-    return pd.DataFrame(summary), sample_export
-
-# --- Step 7.5: Permissions Preview ---
+# =========================================
+# Step 8: Preview permissions of a sample model
+# =========================================
 def fetch_sample_permissions(guid):
     try:
-        res = ts.post_request("/security/metadata/fetch-permissions", {
+        res = ts.post_request("security/metadata/fetch-permissions", {
             "metadata": [{"identifier": guid}]
         })
-        print(f"\n--- Sample Permissions for metadata object GUID '{guid}' ---")
+        print("=========================================")
+        print(f"8) Sample Permissions for metadata object GUID '{guid}':")
         print(res, "\n")
     except Exception as e:
         print(f"[Permissions Error] {guid}: {e}")
 
-# --- MAIN EXECUTION ---
+# =========================================
+# Step 9: Export TMLs and show export status
+# =========================================
+def export_tml_for_sample_guid(guid):
+    payload = {"metadata": [{"identifier": guid}]}
+    try:
+        res = ts.post_request("metadata/tml/export", payload)
+        print("=========================================")
+        print(f"9) Exporting Sample TML for GUID '{guid}'...\n")
+        print(res)
+    except Exception as e:
+        print(f"[Export Error] {guid}: {e}")
+
+# =========================================
+# MAIN EXECUTION FLOW
+# =========================================
+print("=========================================")
 print("1) All fetched models:")
 all_models = get_all_models()
 print(all_models, "\n")
 
+print("=========================================")
 print(f"2) Models older than {args.days} days:")
 old_models = filter_old_models(all_models, args.days)
 print(old_models, "\n")
 
+print("=========================================")
 print(f"3) Models older than {args.days} days with dependencies:")
 models_with_dependencies = []
 for _, model in old_models.iterrows():
@@ -166,6 +185,7 @@ for _, model in old_models.iterrows():
 models_with_dependencies_df = pd.DataFrame(models_with_dependencies)
 print(models_with_dependencies_df[['Name', 'Model_ID', 'Dependent_GUIDs']], "\n")
 
+print("=========================================")
 print(f"4) With dependencies and total impressions (last {args.lookback_days} days):")
 with_impressions = []
 for _, row in models_with_dependencies_df.iterrows():
@@ -174,31 +194,23 @@ for _, row in models_with_dependencies_df.iterrows():
 with_imps_df = pd.DataFrame(with_impressions)
 print(with_imps_df[['Name', 'Model_ID', 'Dependent_GUIDs', 'Total_Impressions']], "\n")
 
+print("=========================================")
 print(f"5) With total impressions < {args.imp_threshold}:")
 filtered = with_imps_df[with_imps_df['Total_Impressions'] < args.imp_threshold].copy()
 print(filtered[['Name', 'Model_ID', 'Dependent_GUIDs', 'Total_Impressions']], "\n")
 
+print("=========================================")
 print("6) Alert check on dependents:")
 filtered['Alert_Status'] = filtered.apply(check_alerts_on_dependents, axis=1)
 print(filtered[['Name', 'Model_ID', 'Total_Impressions', 'Alert_Status']], "\n")
 
+print("=========================================")
 print("7) Models ready for archiving:")
 ready = filtered[filtered['Alert_Status'] == "No Alerts Found"]
 print(ready[['Name', 'Model_ID', 'Total_Impressions', 'Alert_Status']], "\n")
 
-if not ready.empty:
-    # --- Sample Permissions (for first model) ---
-    sample_guid = ready.iloc[0]['Model_ID']
-    fetch_sample_permissions(sample_guid)
-
-    # --- Step 8: Export ---
-    print("8) Exporting TML for models ready for archiving...")
-    export_summary_df, sample_export_json = export_tml(ready)
-    print("\n8) Export summary:")
-    print(export_summary_df, "\n")
-
-    if sample_export_json:
-        print("--- Sample TML Export JSON ---")
-        print(sample_export_json)
+if SAMPLE_GUID:
+    fetch_sample_permissions(SAMPLE_GUID)
+    export_tml_for_sample_guid(SAMPLE_GUID)
 else:
-    print("No models ready for export.")
+    print("[Warning] SAMPLE_GUID not set in environment.")
