@@ -2,6 +2,7 @@
 # Import required libraries
 # =========================================
 import argparse  # For parsing command-line arguments
+import json
 import os  # For accessing environment variables and file paths
 import requests.exceptions  # To handle HTTP request exceptions
 from datetime import datetime, timedelta  # For working with dates and time windows
@@ -129,19 +130,29 @@ def get_total_impressions(dependents, days_window):
 def check_alerts_on_dependents(row):
     for guid in row['Dependent_GUIDs']:  # Loop through all dependents
         try:
-            payload = {"metadata": [{"identifier": guid}], "export_associated": True}  # Build TML export payload
+            payload = {
+                "metadata": [{"identifier": guid}],
+                "export_associated": True,
+                "export_fqn": False,
+                "edoc_format": "JSON",
+                "export_schema_version": "DEFAULT",
+                "export_dependent": False,
+                "export_connection_as_dependent": False,
+                "all_orgs_override": False
+            }
             res = ts.post_request("/metadata/tml/export", payload)  # Export TML
-            if isinstance(res, list):  # Check export result
-                if any(item.get("info", {}).get("filename", "").lower() == "alerts.tml" for item in res):
-                    return "Alert Found"  # Return if alert exists
-            return "No Alerts Found"  # No alerts found
-        except requests.exceptions.HTTPError as e:
-            print(f"[Error] Failed to inspect {guid}: {e.response.status_code}")
-            return "Unknown"
-        except Exception as e:
-            print(f"[Unexpected Error] {guid}: {e}")
-            return "Unknown"
-    return "No Alerts Found"
+
+            if isinstance(res, list):
+                for item in res:
+                    filename = item.get("info", {}).get("filename", "").lower()
+                    if filename == "alerts.tml":
+                        return "Alert Found"
+        except requests.exceptions.RequestException as e:
+            print(f"[Error] Failed to inspect {guid}: {e}")
+            continue  # Skip to next dependent if error
+
+    return "No Alerts Found"  # Default if no alerts found
+
 
 # =========================================
 # Step 8: Preview permissions of a sample model
@@ -150,23 +161,66 @@ def fetch_sample_permissions(guid):
     try:
         res = ts.post_request("/security/metadata/fetch-permissions", {
             "metadata": [{"identifier": guid}]
-        })  # Fetch permissions for the sample GUID
+        })
+
         print("=========================================")
-        print(f"8) Sample Permissions for metadata object GUID '{guid}':")
-        print(res, "\n")
+        print(f"8) Sample Permissions for metadata object GUID '{guid}'...\n")
+
+        if not isinstance(res, dict):
+            print("[Warning] Unexpected permissions format:")
+            print(json.dumps(res, indent=2))
+            return
+
+        print(json.dumps(res, indent=2))  # Pretty-print JSON
+
+        print("=========================================\n")
+
     except Exception as e:
         print(f"[Permissions Error] {guid}: {e}")
 
-# =========================================
 # Step 9: Export TMLs and show export status
 # =========================================
 def export_tml_for_sample_guid(guid):
-    payload = {"metadata": [{"identifier": guid}]}  # Build export payload for sample
+    payload = {
+        "metadata": [{"identifier": guid}],
+        "export_associated": False,
+        "export_fqn": False,
+        "edoc_format": "JSON",
+        "export_schema_version": "DEFAULT",
+        "export_dependent": False,
+        "export_connection_as_dependent": False,
+        "all_orgs_override": False,
+        "export_options": {
+            "include_obj_id_ref": False,
+            "include_guid": True,
+            "include_obj_id": False,
+            "export_with_associated_feedbacks": True
+        }
+    }
+
     try:
-        res = ts.post_request("/metadata/tml/export", payload)  # Export the sample model
+        res = ts.post_request("/metadata/tml/export", payload)
+
         print("=========================================")
-        print(f"9) Exporting Sample TML for GUID '{guid}'...\n")
-        print(res)  # Print the TML export result
+        print(f"9) Sample Export TML & Spotter Feedback '{guid}'...\n")
+
+        if not isinstance(res, list):
+            print("[Warning] Unexpected export format.")
+            print(json.dumps(res, indent=2))
+            return
+
+        for item in res:
+            filename = item.get("info", {}).get("filename", "Unknown file")
+            tml = item.get("edoc", {})
+            print(f"📄 File: {filename}")
+            print("-----------------------------------------")
+            try:
+                parsed = json.loads(tml)
+                print(json.dumps(parsed, indent=2))
+            except json.JSONDecodeError:
+                print(tml)  # fallback if not valid JSON
+            print("=========================================\n")
+
     except Exception as e:
         print(f"[Export Error] {guid}: {e}")
 
@@ -179,12 +233,12 @@ all_models = get_all_models()  # Call function to get all models
 print(all_models, "\n")
 
 print("=========================================")
-print(f"2) Models created in the last {args.days} days:")
+print(f"2) Models NOT created in the last {args.days} days:")
 old_models = filter_old_models(all_models, args.days)  # Filter by age
 print(old_models, "\n")
 
 print("=========================================")
-print(f"3) list of  Dependents for the Models :")
+print(f"3) list of Models and there Dependents :")
 models_with_dependencies = []
 for _, model in old_models.iterrows():
     deps = get_dependents(model['Model_ID'])  # Get dependents for each model
@@ -225,3 +279,7 @@ if SAMPLE_GUID:
     export_tml_for_sample_guid(SAMPLE_GUID)  # Call Step 9
 else:
     print("[Warning] SAMPLE_GUID not set in environment.")
+
+
+
+##Sample Command:  python Scripts/archiving_final.py --days 14  --lookback-days 90  --imp-threshold 300 --env-file Scripts/.env
